@@ -2,16 +2,27 @@
 
 from pathlib import Path
 import re
+import sys
 
-# Match only:
-#   GL1_001.mp3 ... GL9_999.mp3
-# and NOT:
-#   GL10_001.mp3, GL39_009.mp3, GL01_001.mp3
-pattern = re.compile(r"^GL([1-9])_(\d{3})\.mp3$")
+PREVIEW = True
+FOLDER = Path(".")
 
-folder = Path(".")  # change this if needed, e.g. Path("/path/to/folder")
+# Matches:
+#   GL1_001.mp3
+#   ABC9_004.wav
+#   1_001.mp3
+#   12_notes.txt
+#
+# Groups:
+#   1 = optional non-digit prefix (may be empty)
+#   2 = number to pad
+#   3 = rest of filename after underscore
+pattern = re.compile(r"^([^\d]*)(\d+)_(.+)$")
 
-for path in folder.iterdir():
+matches = []
+width_by_prefix = {}
+
+for path in FOLDER.iterdir():
     if not path.is_file():
         continue
 
@@ -19,15 +30,50 @@ for path in folder.iterdir():
     if not m:
         continue
 
-    gl_num = int(m.group(1))
-    suffix = m.group(2)
-    new_name = f"GL{gl_num:02d}_{suffix}.mp3"
-    new_path = path.with_name(new_name)
+    prefix, num_str, rest = m.groups()
+    matches.append((path, prefix, num_str, rest))
+    width_by_prefix[prefix] = max(width_by_prefix.get(prefix, 0), len(num_str))
 
-    if new_path.exists():
-        print(f"Skipping {path.name} -> {new_name} (target already exists)")
+if not matches:
+    print("No matching numbered files found.")
+    sys.exit(0)
+
+renames = []
+
+for path, prefix, num_str, rest in matches:
+    target_width = width_by_prefix[prefix]
+
+    if len(num_str) >= target_width:
         continue
 
-    print(f"Renaming {path.name} -> {new_name}")
-    path.rename(new_path)
+    new_num = f"{int(num_str):0{target_width}d}"
+    new_name = f"{prefix}{new_num}_{rest}"
+    new_path = path.with_name(new_name)
+    renames.append((path, new_path))
+
+if not renames:
+    print("Nothing needs renaming.")
+    sys.exit(0)
+
+conflicts = []
+for old_path, new_path in renames:
+    if new_path.exists() and new_path != old_path:
+        conflicts.append((old_path.name, new_path.name))
+
+if conflicts:
+    print("Conflicts detected. No files were renamed:")
+    for old_name, new_name in conflicts:
+        print(f"  {old_name} -> {new_name} (target already exists)")
+    sys.exit(1)
+
+for old_path, new_path in renames:
+    action = "Would rename" if PREVIEW else "Renaming"
+    print(f"{action} {old_path.name} -> {new_path.name}")
+    if not PREVIEW:
+        old_path.rename(new_path)
+
+if PREVIEW:
+    print("Preview only. No files were renamed.")
+else:
+    print("Done.")
     
